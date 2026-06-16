@@ -431,6 +431,185 @@ format_sdcard() {
     pause
 }
 
+# =========================== PILIH STORAGE UTAMA ============================
+
+pilih_storage_utama() {
+    header "PILIH STORAGE UTAMA"
+    echo -e "${YELLOW}Mendeteksi storage yang tersedia...${NC}"
+    
+    mkdir -p "$CONFIG_DIR"
+    local config="$CONFIG_DIR/storage.conf"
+    
+    declare -a disks_list
+    declare -a disks_name
+    declare -a disks_size
+    declare -a disks_type
+    local idx=0
+    
+    # EMMC
+    for d in $(ls /dev/mmcblk* 2>/dev/null | grep -o 'mmcblk[0-9]\+$' | sort -u); do
+        local size=$(lsblk -ndo SIZE /dev/$d 2>/dev/null)
+        local model=$(lsblk -ndo MODEL /dev/$d 2>/dev/null)
+        disks_list+=("$d")
+        disks_name+=("$d — ${model:-eMMC}")
+        disks_size+=("$size")
+        disks_type+=("emmc")
+    done
+    
+    # SD Card (removable)
+    for d in $(lsblk -ndo NAME | grep -E '^mmcblk[0-9]+$|^sd[a-z]+$'); do
+        local rm=$(cat /sys/block/$d/removable 2>/dev/null)
+        if [[ "$rm" == "1" ]]; then
+            local size=$(lsblk -ndo SIZE /dev/$d 2>/dev/null)
+            local model=$(lsblk -ndo MODEL /dev/$d 2>/dev/null)
+            disks_list+=("$d")
+            disks_name+=("$d — ${model:-SD Card}")
+            disks_size+=("$size")
+            disks_type+=("sdcard")
+        fi
+    done
+    
+    # HDD/SSD eksternal (non-removable, bukan mmc)
+    for d in $(lsblk -ndo NAME | grep -E '^sd[a-z]+$'); do
+        local rm=$(cat /sys/block/$d/removable 2>/dev/null)
+        if [[ "$rm" != "1" ]]; then
+            local size=$(lsblk -ndo SIZE /dev/$d 2>/dev/null)
+            local model=$(lsblk -ndo MODEL /dev/$d 2>/dev/null)
+            disks_list+=("$d")
+            disks_name+=("$d — ${model:-HDD/SSD}")
+            disks_size+=("$size")
+            disks_type+=("external")
+        fi
+    done
+    
+    if [[ ${#disks_list[@]} -eq 0 ]]; then
+        warn "Tidak ada storage terdeteksi (selain boot disk)"
+        pause
+        return
+    fi
+    
+    echo
+    echo -e "${BOLD}Pilih storage utama untuk data:${NC}"
+    echo "  0) Boot disk saat ini (/)"
+    for i in "${!disks_list[@]}"; do
+        local icon=""
+        case "${disks_type[$i]}" in
+            emmc)    icon="💾 eMMC" ;;
+            sdcard)  icon="📇 SD Card" ;;
+            external) icon="💽 HDD/SSD" ;;
+        esac
+        echo -e "  ${CYAN}[$((i+1))]${NC} /dev/${disks_list[$i]} — ${disks_size[$i]} — $icon"
+    done
+    
+    echo
+    read -p "Pilihan [0-${#disks_list[@]}]: " stor_pilih
+    
+    local selected_dev=""
+    local selected_type="boot"
+    local selected_size=""
+    
+    if [[ "$stor_pilih" =~ ^[0-9]+$ ]] && [[ $stor_pilih -ge 1 ]] && [[ $stor_pilih -le ${#disks_list[@]} ]]; then
+        local i=$((stor_pilih-1))
+        selected_dev="${disks_list[$i]}"
+        selected_type="${disks_type[$i]}"
+        selected_size="${disks_size[$i]}"
+    elif [[ "$stor_pilih" == "0" ]]; then
+        selected_dev=""
+        selected_type="boot"
+    else
+        fail "Pilihan tidak valid"
+        pause
+        return
+    fi
+    
+    local target="/mnt/storage"
+    
+    # Jika bukan boot disk, setup mount
+    if [[ "$selected_type" != "boot" ]]; then
+        echo
+        echo -e "${BOLD}Konfigurasi /dev/$selected_dev:${NC}"
+        echo "  1) Format & mount sebagai storage utama"
+        echo "  2) Mount saja (jaga data existing)"
+        read -p "Pilihan [1]: " fmt_pilih
+        
+        # Unmount partisi existing
+        for part in $(lsblk -nlo NAME /dev/$selected_dev 2>/dev/null | grep -v "^$selected_dev$"); do
+            umount /dev/$part 2>/dev/null
+        done
+        
+        # Cek apakah sudah ada partisi
+        local existing_parts=$(lsblk -nlo NAME /dev/$selected_dev 2>/dev/null | grep -v "^$selected_dev$")
+        
+        if [[ -z "$existing_parts" || "$fmt_pilih" == "1" ]]; then
+            if [[ -n "$existing_parts" ]]; then
+                read -p "Semua data akan hilang. Lanjutkan? (y/N): " warn_ans
+                [[ "$warn_ans" != "y" ]] && warn "Dibatalkan" && pause && return
+            fi
+            info "Membuat partisi baru di /dev/$selected_dev..."
+            dd if=/dev/zero of=/dev/$selected_dev bs=1M count=10 status=none 2>/dev/null
+            sleep 1
+            partprobe /dev/$selected_dev 2>/dev/null || true
+            echo -e "g\nn\n\n\n\nw" | fdisk /dev/$selected_dev 2>/dev/null
+            sleep 2
+            partprobe /dev/$selected_dev 2>/dev/null || true
+            local newpart=$(lsblk -nlo NAME /dev/$selected_dev 2>/dev/null | grep -v "^$selected_dev$" | head -1)
+            if [[ -n "$newpart" ]]; then
+                info "Memformat /dev/$newpart ext4..."
+                mkfs.ext4 -F -L "STB-DATA" /dev/$newpart 2>/dev/null
+                selected_dev="$newpart"
+            fi
+        else
+            selected_dev=$(echo "$existing_parts" | head -1)
+        fi
+        
+        # Mount
+        umount /dev/$selected_dev 2>/dev/null
+        mkdir -p "$target"
+        mount /dev/$selected_dev "$target" 2>/dev/null
+        
+        if mountpoint -q "$target"; then
+            # Hapus entry fstab lama untuk /dev/$selected_dev
+            local dev_uuid=$(blkid -s UUID -o value /dev/$selected_dev 2>/dev/null)
+            if [[ -n "$dev_uuid" ]]; then
+                sed -i "\|UUID=$dev_uuid|d" /etc/fstab 2>/dev/null
+                echo "UUID=$dev_uuid $target ext4 defaults,noatime,nodiratime,nofail 0 2" >> /etc/fstab
+            fi
+            ok "/dev/$selected_dev mounted ke $target + fstab"
+        else
+            fail "Gagal mount /dev/$selected_dev"
+        fi
+    fi
+    
+    # Simpan konfigurasi
+    cat > "$config" <<STORCONF
+STORAGE_DEVICE="$selected_dev"
+STORAGE_TYPE="$selected_type"
+STORAGE_SIZE="$selected_size"
+STORAGE_PATH="$target"
+STORAGE_SET_AT="$(date)"
+STORCONF
+    
+    ok "Storage utama: ${selected_type^^} → $target"
+    
+    # Setup symlink untuk service
+    mkdir -p "$target/docker" "$target/media" "$target/downloads" "$target/backup"
+    chmod 777 "$target" "$target/docker" "$target/media" "$target/downloads" "$target/backup"
+    
+    # Docker data root
+    if command -v docker &>/dev/null && [[ -f /etc/docker/daemon.json ]]; then
+        if ! grep -q "$target/docker" /etc/docker/daemon.json 2>/dev/null; then
+            info "Mengarahkan Docker data ke $target/docker..."
+        fi
+    fi
+    
+    echo
+    echo -e "${GREEN}Ringkasan:${NC}"
+    echo -e "  Storage : ${selected_type^^} ${selected_dev:+/dev/$selected_dev}"
+    echo -e "  Mount   : $target"
+    echo -e "  Folder  : docker/  media/  downloads/  backup/"
+    pause
+}
+
 # =========================== SAMBA ==========================================
 
 pasang_samba() {
@@ -896,27 +1075,28 @@ menu_utama() {
         
         echo -e "${BOLD}${BLUE}━━━ STORAGE & NETWORK ━━━${NC}"
         echo -e "  ${CYAN}[10]${NC} Auto Mount HDD/SSD"
-        echo -e "  ${CYAN}[11]${NC} Format SD Card"
-        echo -e "  ${CYAN}[12]${NC} Pasang Samba Share"
-        echo -e "  ${CYAN}[13]${NC} Pasang FileBrowser"
-        echo -e "  ${CYAN}[14]${NC} Pasang AdGuard Home"
+        echo -e "  ${CYAN}[11]${NC} Pilih Storage Utama"
+        echo -e "  ${CYAN}[12]${NC} Format SD Card"
+        echo -e "  ${CYAN}[13]${NC} Pasang Samba Share"
+        echo -e "  ${CYAN}[14]${NC} Pasang FileBrowser"
+        echo -e "  ${CYAN}[15]${NC} Pasang AdGuard Home"
         
         echo -e "${BOLD}${BLUE}━━━ APLIKASI DOCKER ━━━${NC}"
-        echo -e "  ${CYAN}[15]${NC} Pasang Jellyfin"
-        echo -e "  ${CYAN}[16]${NC} Pasang Immich"
-        echo -e "  ${CYAN}[17]${NC} Pasang Tailscale"
+        echo -e "  ${CYAN}[16]${NC} Pasang Jellyfin"
+        echo -e "  ${CYAN}[17]${NC} Pasang Immich"
+        echo -e "  ${CYAN}[18]${NC} Pasang Tailscale"
         
         echo -e "${BOLD}${BLUE}━━━ TOOLS ━━━${NC}"
-        echo -e "  ${CYAN}[18]${NC} Monitoring Sistem"
-        echo -e "  ${CYAN}[19]${NC} Backup & Restore"
-        echo -e "  ${CYAN}[20]${NC} Uninstall Layanan"
+        echo -e "  ${CYAN}[19]${NC} Monitoring Sistem"
+        echo -e "  ${CYAN}[20]${NC} Backup & Restore"
+        echo -e "  ${CYAN}[21]${NC} Uninstall Layanan"
         
         echo -e "${BOLD}${BLUE}━━━ ${NC}"
         echo -e "  ${GREEN}[A]${NC}  Install ALL (semua layanan)"
         echo -e "  ${RED}[Q]${NC}  Keluar"
         echo
         
-        read -p "$(echo -e ${YELLOW}"Pilih menu [1-20/A/Q]: "${NC})" pilih
+        read -p "$(echo -e ${YELLOW}"Pilih menu [1-21/A/Q]: "${NC})" pilih
         
         case $pilih in
             1)  update_system ;;
@@ -929,16 +1109,17 @@ menu_utama() {
             8)  optimasi_hg680p ;;
             9)  optimasi_x96mini ;;
             10) auto_mount ;;
-            11) format_sdcard ;;
-            12) pasang_samba ;;
-            13) pasang_filebrowser ;;
-            14) pasang_docker; pasang_adguard ;;
-            15) pasang_docker; pasang_jellyfin ;;
-            16) pasang_docker; pasang_immich ;;
-            17) pasang_tailscale ;;
-            18) menu_monitor ;;
-            19) menu_backup ;;
-            20) menu_uninstall ;;
+            11) pilih_storage_utama ;;
+            12) format_sdcard ;;
+            13) pasang_samba ;;
+            14) pasang_filebrowser ;;
+            15) pasang_docker; pasang_adguard ;;
+            16) pasang_docker; pasang_jellyfin ;;
+            17) pasang_docker; pasang_immich ;;
+            18) pasang_tailscale ;;
+            19) menu_monitor ;;
+            20) menu_backup ;;
+            21) menu_uninstall ;;
             a|A) pasang_semua ;;
             q|Q) echo -e "${GREEN}Terima kasih!${NC}"; exit 0 ;;
             *)   echo -e "${RED}Pilihan tidak valid${NC}"; sleep 1 ;;
