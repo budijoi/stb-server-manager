@@ -920,91 +920,177 @@ menu_backup() {
 
 # =========================== UNINSTALL ======================================
 
-menu_uninstall() {
-    header "UNINSTALL LAYANAN"
-    echo -e "${RED}${BOLD}Pilih layanan yang akan dihapus:${NC}"
-    echo "1) CasaOS"
-    echo "2) Portainer"
-    echo "3) Cockpit"
-    echo "4) FileBrowser"
-    echo "5) AdGuard Home"
-    echo "6) Jellyfin"
-    echo "7) Immich"
-    echo "8) Tailscale"
-    echo "9) Samba"
-    echo "10) Docker (semua container + images)"
-    echo "11) Kembali"
-    read -p "Pilihan [1-11]: " usta
-    
-    read -p "Yakin hapus? (y/N): " yakin
-    [[ "$yakin" != "y" ]] && return
-    
-    case $usta in
-        1)
-            systemctl stop casaos 2>/dev/null
-            systemctl disable casaos 2>/dev/null
-            rm -rf /etc/casaos /usr/share/casaos /var/lib/casaos 2>/dev/null
-            rm -f /etc/systemd/system/casaos.service 2>/dev/null
-            systemctl daemon-reload
-            ok "CasaOS dihapus"
-            ;;
-        2)
-            docker stop portainer 2>/dev/null; docker rm portainer 2>/dev/null
-            docker volume rm portainer_data 2>/dev/null
-            ok "Portainer dihapus"
-            ;;
-        3)
-            apt remove -y cockpit 2>/dev/null
-            ok "Cockpit dihapus"
-            ;;
-        4)
-            systemctl stop filebrowser 2>/dev/null
-            systemctl disable filebrowser 2>/dev/null
-            rm -f /usr/local/bin/filebrowser /etc/systemd/system/filebrowser.service
-            rm -rf /etc/filebrowser
-            systemctl daemon-reload
-            ok "FileBrowser dihapus"
-            ;;
-        5)
-            docker stop adguardhome 2>/dev/null; docker rm adguardhome 2>/dev/null
-            rm -rf /opt/adguard 2>/dev/null
-            ok "AdGuard dihapus"
-            ;;
-        6)
-            docker stop jellyfin 2>/dev/null; docker rm jellyfin 2>/dev/null
-            rm -rf /opt/jellyfin 2>/dev/null
-            ok "Jellyfin dihapus"
-            ;;
-        7)
-            cd /opt/immich
-            docker compose down -v 2>/dev/null
-            cd "$SCRIPT_DIR"
-            rm -rf /opt/immich 2>/dev/null
-            ok "Immich dihapus"
-            ;;
-        8)
-            tailscale down 2>/dev/null
-            apt remove -y tailscale 2>/dev/null
-            ok "Tailscale dihapus"
-            ;;
-        9)
-            systemctl stop smbd 2>/dev/null
-            systemctl disable smbd 2>/dev/null
-            apt remove -y samba samba-common-bin 2>/dev/null
-            ok "Samba dihapus"
-            ;;
-        10)
-            docker stop $(docker ps -aq) 2>/dev/null
-            docker rm $(docker ps -aq) 2>/dev/null
-            docker system prune -af 2>/dev/null
-            docker volume prune -af 2>/dev/null
-            apt remove -y docker docker-engine docker.io containerd runc docker-ce docker-ce-cli 2>/dev/null
-            rm -rf /var/lib/docker /etc/docker 2>/dev/null
-            ok "Docker dihapus total"
-            ;;
-        11) return ;;
+# =========================== DETEKSI LAYANAN =================================
+
+deteksi_terinstall() {
+    local svc=$1
+    case $svc in
+        casaos)     systemctl is-active --quiet casaos 2>/dev/null && return 0; [[ -f /etc/systemd/system/casaos.service ]] && return 0; return 1 ;;
+        portainer)  docker ps --format '{{.Names}}' 2>/dev/null | grep -q portainer && return 0; docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q portainer && return 0; return 1 ;;
+        cockpit)    systemctl list-units --full -all 2>/dev/null | grep -q "cockpit.service" && return 0; command -v cockpit-bridge &>/dev/null && return 0; return 1 ;;
+        filebrowser) systemctl list-units --full -all 2>/dev/null | grep -q "filebrowser.service"; return $? ;;
+        adguard)    docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q adguardhome; return $? ;;
+        jellyfin)   docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q jellyfin; return $? ;;
+        immich)     [[ -d /opt/immich ]] && return 0; return 1 ;;
+        tailscale)  command -v tailscale &>/dev/null; return $? ;;
+        samba)      command -v smbd &>/dev/null; return $? ;;
+        docker)     command -v docker &>/dev/null; return $? ;;
+        nginx)      command -v nginx &>/dev/null; return $? ;;
+        *) return 1 ;;
     esac
-    pause
+}
+
+# =========================== UNINSTALL ======================================
+
+menu_uninstall() {
+    while true; do
+        header "UNINSTALL LAYANAN"
+        
+        # Build dynamic list of installed services
+        declare -a svc_ids svc_names svc_rm_funcs
+        local svc_idx=0
+        
+        _add_svc() {
+            if deteksi_terinstall "$1"; then
+                svc_ids+=("$1")
+                svc_names+=("$2")
+                svc_rm_funcs+=("$3")
+                svc_idx=$((svc_idx+1))
+            fi
+        }
+        
+        _add_svc "casaos"     "CasaOS"        "_rm_casaos"
+        _add_svc "portainer"  "Portainer"     "_rm_portainer"
+        _add_svc "cockpit"    "Cockpit"       "_rm_cockpit"
+        _add_svc "filebrowser" "FileBrowser"  "_rm_filebrowser"
+        _add_svc "adguard"    "AdGuard Home"  "_rm_adguard"
+        _add_svc "jellyfin"   "Jellyfin"      "_rm_jellyfin"
+        _add_svc "immich"     "Immich"        "_rm_immich"
+        _add_svc "tailscale"  "Tailscale"     "_rm_tailscale"
+        _add_svc "samba"      "Samba"         "_rm_samba"
+        _add_svc "docker"     "Docker (all)"  "_rm_docker"
+        _add_svc "nginx"      "Nginx + PHP"   "_rm_nginx"
+        
+        if [[ ${#svc_ids[@]} -eq 0 ]]; then
+            echo -e "${GREEN}Tidak ada layanan terinstall.${NC}"
+            pause
+            return
+        fi
+        
+        echo -e "${BOLD}${RED}Layanan TERINSTAL — pilih yang akan dihapus:${NC}\n"
+        echo -e "   ${YELLOW}No  Status    Service${NC}"
+        echo "   -- -------- ------------------------------"
+        for i in "${!svc_ids[@]}"; do
+            local num=$((i+1))
+            local status="${GREEN}  INSTALLED${NC}"
+            printf "   ${CYAN}%2d)${NC} %s %s\n" "$num" "$status" "${svc_names[$i]}"
+        done
+        
+        echo
+        echo "   0) Kembali ke menu utama"
+        echo
+        read -p "$(echo -e ${YELLOW}Pilih nomor [0-${#svc_ids[@]}]: ${NC})" usta
+        
+        [[ "$usta" == "0" ]] && break
+        
+        if [[ ! "$usta" =~ ^[0-9]+$ ]] || [[ $usta -lt 1 ]] || [[ $usta -gt ${#svc_ids[@]} ]]; then
+            echo -e "${RED}Pilihan tidak valid${NC}"; sleep 1; continue
+        fi
+        
+        local idx=$((usta-1))
+        local selected_id="${svc_ids[$idx]}"
+        local selected_name="${svc_names[$idx]}"
+        local selected_func="${svc_rm_funcs[$idx]}"
+        
+        echo
+        echo -e "${RED}${BOLD}Akan menghapus: ${selected_name}${NC}"
+        read -p "Yakin? (ketik nama layanan untuk konfirmasi): " confirm
+        [[ "$confirm" != "${svc_names[$idx]}" ]] && warn "Dibatalkan, nama tidak cocok" && sleep 1 && continue
+        
+        $selected_func
+        pause
+        break
+    done
+}
+
+# =========================== FUNGSI REMOVE ==================================
+
+_rm_casaos() {
+    systemctl stop casaos 2>/dev/null
+    systemctl disable casaos 2>/dev/null
+    rm -rf /etc/casaos /usr/share/casaos /var/lib/casaos 2>/dev/null
+    rm -f /etc/systemd/system/casaos.service 2>/dev/null
+    systemctl daemon-reload
+    ok "CasaOS dihapus"
+}
+
+_rm_portainer() {
+    docker stop portainer 2>/dev/null; docker rm portainer 2>/dev/null
+    docker volume rm portainer_data 2>/dev/null
+    ok "Portainer dihapus"
+}
+
+_rm_cockpit() {
+    apt remove -y cockpit 2>/dev/null
+    ok "Cockpit dihapus"
+}
+
+_rm_filebrowser() {
+    systemctl stop filebrowser 2>/dev/null
+    systemctl disable filebrowser 2>/dev/null
+    rm -f /usr/local/bin/filebrowser /etc/systemd/system/filebrowser.service
+    rm -rf /etc/filebrowser
+    systemctl daemon-reload
+    ok "FileBrowser dihapus"
+}
+
+_rm_adguard() {
+    docker stop adguardhome 2>/dev/null; docker rm adguardhome 2>/dev/null
+    rm -rf /opt/adguard 2>/dev/null
+    ok "AdGuard dihapus"
+}
+
+_rm_jellyfin() {
+    docker stop jellyfin 2>/dev/null; docker rm jellyfin 2>/dev/null
+    rm -rf /opt/jellyfin 2>/dev/null
+    ok "Jellyfin dihapus"
+}
+
+_rm_immich() {
+    cd /opt/immich 2>/dev/null && docker compose down -v 2>/dev/null
+    cd "$SCRIPT_DIR"
+    rm -rf /opt/immich 2>/dev/null
+    ok "Immich dihapus"
+}
+
+_rm_tailscale() {
+    tailscale down 2>/dev/null
+    apt remove -y tailscale 2>/dev/null
+    ok "Tailscale dihapus"
+}
+
+_rm_samba() {
+    systemctl stop smbd 2>/dev/null
+    systemctl disable smbd 2>/dev/null
+    apt remove -y samba samba-common-bin 2>/dev/null
+    ok "Samba dihapus"
+}
+
+_rm_docker() {
+    docker stop $(docker ps -aq) 2>/dev/null
+    docker rm $(docker ps -aq) 2>/dev/null
+    docker system prune -af 2>/dev/null
+    docker volume prune -af 2>/dev/null
+    apt remove -y docker docker-engine docker.io containerd runc docker-ce docker-ce-cli 2>/dev/null
+    rm -rf /var/lib/docker /etc/docker 2>/dev/null
+    ok "Docker dihapus total"
+}
+
+_rm_nginx() {
+    systemctl stop nginx 2>/dev/null
+    systemctl disable nginx 2>/dev/null
+    apt remove -y nginx php-fpm php-cli php-mbstring php-curl php-xml php-zip 2>/dev/null
+    ok "Nginx + PHP dihapus"
 }
 
 # =========================== INSTALASI ALL IN ONE ===========================
