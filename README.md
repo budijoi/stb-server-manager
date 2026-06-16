@@ -58,7 +58,7 @@ Script otomatis mendeteksi chipset STB dan menerapkan tweak spesifik:
 
 ```bash
 # Clone atau download script
-wget https://raw.githubusercontent.com/budijoi/stb-server/main/stb-server.sh
+wget https://raw.githubusercontent.com/budijoi/stb-server-manager/main/stb-server.sh
 
 # Beri izin eksekusi
 chmod +x stb-server.sh
