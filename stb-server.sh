@@ -320,6 +320,117 @@ auto_mount() {
     pause
 }
 
+# =========================== FORMAT SD CARD =================================
+
+format_sdcard() {
+    header "FORMAT SD CARD"
+    echo -e "${YELLOW}Mendeteksi kartu SD...${NC}"
+    lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL | grep -v "loop"
+    echo
+
+    local candidates=$(lsblk -ndo NAME,TYPE,SIZE | grep "disk" | awk '{print $1}')
+    local sdcard=""
+    local idx=0
+    declare -a opts
+
+    for d in $candidates; do
+        local model=$(lsblk -ndo MODEL /dev/$d 2>/dev/null)
+        local size=$(lsblk -ndo SIZE /dev/$d 2>/dev/null)
+        local rm=$(cat /sys/block/$d/removable 2>/dev/null)
+        idx=$((idx+1))
+        opts+=("$d")
+        if [[ "$rm" == "1" ]]; then
+            echo -e "  ${CYAN}[$idx]${NC} /dev/$d — ${size} (REMOVABLE) $model ${GREEN}← SD Card${NC}"
+        else
+            echo -e "  ${CYAN}[$idx]${NC} /dev/$d — ${size} $model"
+        fi
+    done
+
+    if [[ $idx -eq 0 ]]; then
+        warn "Tidak ada disk ditemukan"
+        pause
+        return
+    fi
+
+    echo
+    read -p "Pilih disk [1-$idx]: " disk_pilih
+    local selected="${opts[$((disk_pilih-1))]}"
+    if [[ -z "$selected" ]]; then
+        fail "Pilihan tidak valid"
+        pause
+        return
+    fi
+
+    echo
+    echo -e "${RED}${BOLD}PERINGATAN: Semua data di /dev/$selected akan HILANG!${NC}"
+    read -p "Yakin ingin memformat /dev/$selected? (ketik YES): " confirm
+    [[ "$confirm" != "YES" ]] && warn "Dibatalkan" && pause && return
+
+    echo
+    echo -e "Pilih filesystem:"
+    echo "1) ext4  (Linux — recommended)"
+    echo "2) NTFS  (Windows compatible)"
+    echo "3) exFAT (Universal)"
+    read -p "Pilihan [1]: " fs_pilih
+
+    local fs_type="ext4"
+    local fs_cmd="mkfs.ext4 -F"
+    case $fs_pilih in
+        2) fs_type="ntfs"; fs_cmd="mkfs.ntfs -f" ;;
+        3) fs_type="exfat"; fs_cmd="mkfs.exfat" ;;
+    esac
+
+    local label="STB-${fs_type^^}"
+    read -p "Label volume [${label}]: " custom_label
+    [[ -n "$custom_label" ]] && label="$custom_label"
+
+    echo
+    info "Mounting partitions /dev/${selected}*..."
+    for part in $(lsblk -nlo NAME /dev/$selected 2>/dev/null | grep -v "^$selected$"); do
+        umount /dev/$part 2>/dev/null
+    done
+
+    info "Menghapus partisi /dev/$selected..."
+    dd if=/dev/zero of=/dev/$selected bs=1M count=10 status=none 2>/dev/null
+    sleep 1
+    partprobe /dev/$selected 2>/dev/null || true
+
+    info "Membuat partisi baru..."
+    echo -e "g\nn\n\n\n\nw" | fdisk /dev/$selected 2>/dev/null
+    sleep 2
+    partprobe /dev/$selected 2>/dev/null || true
+
+    local newpart=$(lsblk -nlo NAME /dev/$selected 2>/dev/null | grep -v "^$selected$" | head -1)
+    if [[ -z "$newpart" ]]; then
+        fail "Gagal mendeteksi partisi baru"
+        pause
+        return
+    fi
+
+    info "Memformat /dev/$newpart sebagai $fs_type..."
+    if [[ "$fs_type" == "ext4" ]]; then
+        $fs_cmd -L "$label" /dev/$newpart 2>/dev/null
+    else
+        $fs_cmd -L "$label" /dev/$newpart 2>/dev/null
+    fi
+
+    if [[ $? -eq 0 ]]; then
+        ok "Format selesai! /dev/$newpart → $fs_type (label: $label)"
+        local target="/mnt/sdcard"
+        mkdir -p "$target"
+        mount /dev/$newpart "$target" 2>/dev/null && ok "Auto-mounted ke $target"
+
+        local uuid=$(blkid -s UUID -o value /dev/$newpart 2>/dev/null)
+        if [[ -n "$uuid" ]] && ! grep -q "$uuid" /etc/fstab; then
+            echo "UUID=$uuid $target $fs_type defaults,noatime,nodiratime,nofail 0 2" >> /etc/fstab
+            ok "Entry fstab ditambahkan"
+        fi
+    else
+        fail "Gagal memformat"
+    fi
+    pause
+}
+
 # =========================== SAMBA ==========================================
 
 pasang_samba() {
@@ -785,26 +896,27 @@ menu_utama() {
         
         echo -e "${BOLD}${BLUE}━━━ STORAGE & NETWORK ━━━${NC}"
         echo -e "  ${CYAN}[10]${NC} Auto Mount HDD/SSD"
-        echo -e "  ${CYAN}[11]${NC} Pasang Samba Share"
-        echo -e "  ${CYAN}[12]${NC} Pasang FileBrowser"
-        echo -e "  ${CYAN}[13]${NC} Pasang AdGuard Home"
+        echo -e "  ${CYAN}[11]${NC} Format SD Card"
+        echo -e "  ${CYAN}[12]${NC} Pasang Samba Share"
+        echo -e "  ${CYAN}[13]${NC} Pasang FileBrowser"
+        echo -e "  ${CYAN}[14]${NC} Pasang AdGuard Home"
         
         echo -e "${BOLD}${BLUE}━━━ APLIKASI DOCKER ━━━${NC}"
-        echo -e "  ${CYAN}[14]${NC} Pasang Jellyfin"
-        echo -e "  ${CYAN}[15]${NC} Pasang Immich"
-        echo -e "  ${CYAN}[16]${NC} Pasang Tailscale"
+        echo -e "  ${CYAN}[15]${NC} Pasang Jellyfin"
+        echo -e "  ${CYAN}[16]${NC} Pasang Immich"
+        echo -e "  ${CYAN}[17]${NC} Pasang Tailscale"
         
         echo -e "${BOLD}${BLUE}━━━ TOOLS ━━━${NC}"
-        echo -e "  ${CYAN}[17]${NC} Monitoring Sistem"
-        echo -e "  ${CYAN}[18]${NC} Backup & Restore"
-        echo -e "  ${CYAN}[19]${NC} Uninstall Layanan"
+        echo -e "  ${CYAN}[18]${NC} Monitoring Sistem"
+        echo -e "  ${CYAN}[19]${NC} Backup & Restore"
+        echo -e "  ${CYAN}[20]${NC} Uninstall Layanan"
         
         echo -e "${BOLD}${BLUE}━━━ ${NC}"
         echo -e "  ${GREEN}[A]${NC}  Install ALL (semua layanan)"
         echo -e "  ${RED}[Q]${NC}  Keluar"
         echo
         
-        read -p "$(echo -e ${YELLOW}"Pilih menu [1-19/A/Q]: "${NC})" pilih
+        read -p "$(echo -e ${YELLOW}"Pilih menu [1-20/A/Q]: "${NC})" pilih
         
         case $pilih in
             1)  update_system ;;
@@ -817,15 +929,16 @@ menu_utama() {
             8)  optimasi_hg680p ;;
             9)  optimasi_x96mini ;;
             10) auto_mount ;;
-            11) pasang_samba ;;
-            12) pasang_filebrowser ;;
-            13) pasang_docker; pasang_adguard ;;
-            14) pasang_docker; pasang_jellyfin ;;
-            15) pasang_docker; pasang_immich ;;
-            16) pasang_tailscale ;;
-            17) menu_monitor ;;
-            18) menu_backup ;;
-            19) menu_uninstall ;;
+            11) format_sdcard ;;
+            12) pasang_samba ;;
+            13) pasang_filebrowser ;;
+            14) pasang_docker; pasang_adguard ;;
+            15) pasang_docker; pasang_jellyfin ;;
+            16) pasang_docker; pasang_immich ;;
+            17) pasang_tailscale ;;
+            18) menu_monitor ;;
+            19) menu_backup ;;
+            20) menu_uninstall ;;
             a|A) pasang_semua ;;
             q|Q) echo -e "${GREEN}Terima kasih!${NC}"; exit 0 ;;
             *)   echo -e "${RED}Pilihan tidak valid${NC}"; sleep 1 ;;
