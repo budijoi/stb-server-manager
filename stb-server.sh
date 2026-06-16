@@ -324,6 +324,10 @@ auto_mount() {
 
 format_sdcard() {
     header "FORMAT SD CARD"
+    
+    # Pastikan tools format tersedia
+    apt install -y exfatprogs ntfs-3g fdisk parted 2>/dev/null
+    
     echo -e "${YELLOW}Mendeteksi kartu SD...${NC}"
     lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL | grep -v "loop"
     echo
@@ -408,11 +412,7 @@ format_sdcard() {
     fi
 
     info "Memformat /dev/$newpart sebagai $fs_type..."
-    if [[ "$fs_type" == "ext4" ]]; then
-        $fs_cmd -L "$label" /dev/$newpart 2>/dev/null
-    else
-        $fs_cmd -L "$label" /dev/$newpart 2>/dev/null
-    fi
+    $fs_cmd -L "$label" /dev/$newpart 2>/dev/null
 
     if [[ $? -eq 0 ]]; then
         ok "Format selesai! /dev/$newpart → $fs_type (label: $label)"
@@ -441,7 +441,6 @@ pilih_storage_utama() {
     local config="$CONFIG_DIR/storage.conf"
     
     declare -a disks_list
-    declare -a disks_name
     declare -a disks_size
     declare -a disks_type
     local idx=0
@@ -449,9 +448,7 @@ pilih_storage_utama() {
     # EMMC
     for d in $(ls /dev/mmcblk* 2>/dev/null | grep -o 'mmcblk[0-9]\+$' | sort -u); do
         local size=$(lsblk -ndo SIZE /dev/$d 2>/dev/null)
-        local model=$(lsblk -ndo MODEL /dev/$d 2>/dev/null)
         disks_list+=("$d")
-        disks_name+=("$d — ${model:-eMMC}")
         disks_size+=("$size")
         disks_type+=("emmc")
     done
@@ -461,9 +458,7 @@ pilih_storage_utama() {
         local rm=$(cat /sys/block/$d/removable 2>/dev/null)
         if [[ "$rm" == "1" ]]; then
             local size=$(lsblk -ndo SIZE /dev/$d 2>/dev/null)
-            local model=$(lsblk -ndo MODEL /dev/$d 2>/dev/null)
             disks_list+=("$d")
-            disks_name+=("$d — ${model:-SD Card}")
             disks_size+=("$size")
             disks_type+=("sdcard")
         fi
@@ -474,9 +469,7 @@ pilih_storage_utama() {
         local rm=$(cat /sys/block/$d/removable 2>/dev/null)
         if [[ "$rm" != "1" ]]; then
             local size=$(lsblk -ndo SIZE /dev/$d 2>/dev/null)
-            local model=$(lsblk -ndo MODEL /dev/$d 2>/dev/null)
             disks_list+=("$d")
-            disks_name+=("$d — ${model:-HDD/SSD}")
             disks_size+=("$size")
             disks_type+=("external")
         fi
