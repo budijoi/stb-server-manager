@@ -1310,11 +1310,13 @@ menu_utama() {
     while true; do
         header "STB SERVER MANAGER v${VERSION}"
         
-        echo -e "${BOLD}${GREEN}  ╔═══════════════════════════════════════════╗${NC}"
-        echo -e "${BOLD}${GREEN}  ║${NC}  ${WHITE}SoC:${NC} $(printf "%-15s" "$SOC") ${GREEN}║${NC}"
-        echo -e "${BOLD}${GREEN}  ║${NC}  ${WHITE}Suhu:${NC} $(printf "%-13s" "$SUHU") ${GREEN}║${NC}"
-        echo -e "${BOLD}${GREEN}  ║${NC}  ${WHITE}RAM:${NC} $(printf "%-14s" "$RAM_USED / $RAM_TOTAL") ${GREEN}║${NC}"
-        echo -e "${BOLD}${GREEN}  ╚═══════════════════════════════════════════╝${NC}"
+        local _bw=43
+        _box_line() { local _l="$1" _v="$2"; local _c="  $_l: $_v"; local _p=$((_bw - ${#_c})); [[ $_p -lt 0 ]] && _p=0; echo -e "${BOLD}${GREEN}  ║${NC}${_c}$(printf '%*s' $_p '')${BOLD}${GREEN}║${NC}"; }
+        echo -e "${BOLD}${GREEN}  ╔$(printf '═%.0s' $(seq 1 $_bw))╗${NC}"
+        _box_line "SoC" "$SOC"
+        _box_line "Suhu" "$SUHU"
+        _box_line "RAM"  "$RAM_USED / $RAM_TOTAL"
+        echo -e "${BOLD}${GREEN}  ╚$(printf '═%.0s' $(seq 1 $_bw))╝${NC}"
         echo
         
         echo -e "${BOLD}${BLUE}━━━ INSTALASI LAYANAN ━━━${NC}"
