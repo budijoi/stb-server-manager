@@ -983,7 +983,7 @@ menu_uninstall() {
         for i in "${!svc_ids[@]}"; do
             local num=$((i+1))
             local status="${GREEN}  INSTALLED${NC}"
-            printf "   ${CYAN}%2d)${NC} %s %s\n" "$num" "$status" "${svc_names[$i]}"
+            echo -e "   ${CYAN}$(printf '%2d' $num))${NC} $status ${svc_names[$i]}"
         done
         
         echo
