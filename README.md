@@ -27,32 +27,37 @@ Script otomatis mendeteksi chipset STB dan menerapkan tweak spesifik:
 | Menu | Fitur | Detail |
 |---|---|---|
 | 10 | **Auto Mount HDD/SSD** | Deteksi partisi baru → mount otomatis → entry fstab. Opsi format ext4 jika gagal mount |
-| 11 | **Pilih Storage Utama** | Pilih EMMC / SD Card / HDD/SSD sebagai primary storage. Format + mount ke `/mnt/storage` + subfolder `docker/`, `media/`, `downloads/`, `backup/` |
+| 11 | **Pilih Storage Utama** | Pilih EMMC / SD Card / HDD/SSD sebagai primary storage. Format + mount ke `/mnt/storage` + subfolder |
 | 12 | **Format SD Card** | Wipe + partisi GPT + format ext4/NTFS/exFAT. Auto-mount ke `/mnt/sdcard` |
 | 13 | **Samba Share** | File sharing via SMB. Akses dari Windows: `\\ip\stbshare` |
-| 14 | **FileBrowser** | Web file manager di port **8080** (default: admin/admin) |
+| 14 | **FileBrowser** | Web file manager di port **8080** (root: `/`, user: `admin` / `admin12345678`) |
 | 15 | **AdGuard Home** | DNS-level ad blocker di port **3000** (web UI) + **53** (DNS) |
 
-### 🐳 Aplikasi Docker
+### 🐳 Aplikasi Docker & Tunnel
 | Menu | Fitur | Port | Fungsi |
 |---|---|---|---|
 | 16 | **Jellyfin** | 8096 | Media server (film, musik, TV) |
 | 17 | **Immich** | 2283 | Google Photos alternatif — backup foto/video |
 | 18 | **Tailscale** | - | VPN mesh untuk akses remote aman |
+| 19 | **Cloudflared** | - | Cloudflare Tunnel untuk expose service via Cloudflare |
 
 ### 🛠 Tools
 | Menu | Fitur | Detail |
 |---|---|---|
-| 19 | **Monitoring** | Tampilkan suhu CPU, RAM, load, uptime, status Docker & service, akses HTOP |
-| 20 | **Backup & Restore** | Backup konfigurasi (Samba, Nginx, CasaOS, FileBrowser) + Docker volumes. Restore dari file backup |
-| 21 | **Uninstall Cerdas** | **Auto-detect** layanan yang terinstall — hanya tampilkan yang ada. Dukungan: CasaOS, Portainer, Cockpit, FileBrowser, AdGuard, Jellyfin, Immich, Tailscale, Samba, Docker, Nginx. Ada opsi **99) HAPUS SEMUA** untuk uninstall semua sekaligus |
+| 20 | **Service Manager** | Start / Stop / Restart semua service (systemd + Docker). Bisa Start All / Stop All sekaligus |
+| 21 | **Monitoring** | Tampilkan suhu CPU, RAM, load, uptime, info EMMC/SD/HDD, status Docker & service, akses HTOP |
+| 22 | **Backup & Restore** | Backup konfigurasi (Samba, Nginx, CasaOS, FileBrowser) + Docker volumes. Restore dari file backup |
+| 23 | **Uninstall Cerdas** | **Auto-detect** layanan yang terinstall — hanya tampilkan yang ada. Support: CasaOS, Portainer, Cockpit, FileBrowser, AdGuard, Jellyfin, Immich, Tailscale, Samba, Docker, Nginx, Cloudflared. Opsi **99) HAPUS SEMUA** |
+| 24 | **Cleanup Sistem** | Bersihkan apt cache, journal log, thumbnail, tmp files, old logs, Docker prune (container/image/volume/build cache). Tampilkan ruang yang dibebaskan |
 | A | **Install All** | Satu perintah untuk install semua layanan + optimasi sesuai chipset |
 
 ## Menu Utama
 
 ```
  ╔═══════════════════════════════════════════╗
- ║        STB SERVER MANAGER v3.0            ║
+ ║  SoC: S905X                               ║
+ ║  Suhu: 56.2°C                             ║
+ ║  RAM: 450Mi / 1.7Gi                       ║
  ╚═══════════════════════════════════════════╝
 
  ━━━ INSTALASI LAYANAN ━━━
@@ -80,23 +85,42 @@ Script otomatis mendeteksi chipset STB dan menerapkan tweak spesifik:
   [16] Pasang Jellyfin
   [17] Pasang Immich
   [18] Pasang Tailscale
+  [19] Pasang Cloudflared
 
  ━━━ TOOLS ━━━
-  [19] Monitoring Sistem
-  [20] Backup & Restore
-  [21] Uninstall Layanan
+  [20] Service Manager (start/stop)
+  [21] Monitoring Sistem
+  [22] Backup & Restore
+  [23] Uninstall Layanan
+  [24] Cleanup Sistem
 
   [A]  Install ALL (semua layanan)
   [Q]  Keluar
 ```
 
-### Uninstall Menu (Sub-menu)
+### Service Manager (menu 20)
 
 ```
- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        UNINSTALL LAYANAN
- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ No  Service              Status
+ -- -------------------- ---------
+  1) CasaOS               running
+  2) Portainer            running
+  3) FileBrowser          running
+  4) Samba                running
+  5) Nginx                running
+  6) adguardhome (docker) running
+  7) jellyfin (docker)    stopped
 
+   A) Start all
+   S) Stop all
+   0) Kembali
+```
+
+Pilih nomor layanan untuk Start / Stop / Restart individual.
+
+### Uninstall Menu (menu 23)
+
+```
  No  Status    Service
  -- -------- ------------------------------
   1   INSTALLED CasaOS
@@ -104,7 +128,6 @@ Script otomatis mendeteksi chipset STB dan menerapkan tweak spesifik:
   3   INSTALLED Cockpit
   4   INSTALLED Samba
   5   INSTALLED Docker (all)
-  6   INSTALLED Nginx + PHP
 
  99) HAPUS SEMUA LAYANAN
   0) Kembali ke menu utama
@@ -158,7 +181,8 @@ stb-server.log      # Log aktivitas
 
 - Script membutuhkan akses **root** (`sudo`).
 - Beberapa fitur (AdGuard, Jellyfin, Immich) membutuhkan **Docker** — akan diinstall otomatis jika belum ada.
-- Untuk akses remote dari luar jaringan, gunakan **Tailscale** (menu 18) atau port forwarding.
+- Untuk akses remote dari luar jaringan, gunakan **Tailscale** (menu 18) atau **Cloudflared** (menu 19).
+- FileBrowser: akses folder root `/` dengan user `admin` / `admin12345678` di port **8080**.
 - Backup direkomendasikan sebelum menjalankan uninstall atau install ulang layanan.
 
 ## Lisensi
