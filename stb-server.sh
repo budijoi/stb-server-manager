@@ -943,6 +943,139 @@ menu_monitor() {
     done
 }
 
+# =========================== SERVICE MANAGER =================================
+
+menu_services() {
+    while true; do
+        header "SERVICE MANAGER"
+        
+        declare -a svc_ids svc_names svc_status
+        local svc_idx=0
+
+        _probe_svc() {
+            local id="$1" name="$2"
+            local status="${RED}stopped${NC}"
+            if systemctl is-active --quiet "$id" 2>/dev/null || docker ps --format '{{.Names}}' 2>/dev/null | grep -q "$id"; then
+                status="${GREEN}running${NC}"
+            fi
+            svc_ids+=("$id")
+            svc_names+=("$name")
+            svc_status+=("$status")
+        }
+
+        _probe_svc "casaos"      "CasaOS"
+        _probe_svc "portainer"   "Portainer"
+        _probe_svc "cockpit"     "Cockpit"
+        _probe_svc "filebrowser" "FileBrowser"
+        _probe_svc "smbd"        "Samba"
+        _probe_svc "nginx"       "Nginx"
+        _probe_svc "cloudflared" "Cloudflared"
+        _probe_svc "tailscaled"  "Tailscale"
+
+        if command -v docker &>/dev/null; then
+            for _c in adguardhome jellyfin; do
+                if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "$_c"; then
+                    local _s="${RED}stopped${NC}"
+                    docker ps --format '{{.Names}}' 2>/dev/null | grep -q "$_c" && _s="${GREEN}running${NC}"
+                    svc_ids+=("docker-$_c")
+                    svc_names+=("$_c (docker)")
+                    svc_status+=("$_s")
+                fi
+            done
+        fi
+
+        if [[ ${#svc_ids[@]} -eq 0 ]]; then
+            echo -e "${YELLOW}Tidak ada layangan terdeteksi.${NC}"
+            pause; return
+        fi
+
+        echo -e "${BOLD}Layanan terdeteksi:${NC}\n"
+        printf "   %2s  %-20s %s\n" "No" "Service" "Status"
+        echo "   -- -------------------- ---------"
+        for i in "${!svc_ids[@]}"; do
+            printf "   %2d) %-20s %b\n" $((i+1)) "${svc_names[$i]}" "${svc_status[$i]}"
+        done
+
+        echo
+        echo "   A) Start all"
+        echo "   S) Stop all"
+        echo "   0) Kembali"
+        echo
+        read -p "$(echo -e ${YELLOW}Pilih [No/A/S/0]: ${NC})" svc_pick
+
+        [[ "$svc_pick" == "0" ]] && break
+
+        if [[ "$svc_pick" =~ ^[Aa]$ ]]; then
+            echo
+            for i in "${!svc_ids[@]}"; do
+                local _id="${svc_ids[$i]}"
+                echo -e "${CYAN}>>> Start ${svc_names[$i]}...${NC}"
+                if [[ "$_id" == docker-* ]]; then
+                    docker start "${_id#docker-}" 2>/dev/null
+                else
+                    systemctl start "$_id" 2>/dev/null
+                fi
+            done
+            ok "Semua service di-start"
+            pause; continue
+        fi
+
+        if [[ "$svc_pick" =~ ^[Ss]$ ]]; then
+            echo
+            for i in "${!svc_ids[@]}"; do
+                local _id="${svc_ids[$i]}"
+                echo -e "${YELLOW}>>> Stop ${svc_names[$i]}...${NC}"
+                if [[ "$_id" == docker-* ]]; then
+                    docker stop "${_id#docker-}" 2>/dev/null
+                else
+                    systemctl stop "$_id" 2>/dev/null
+                fi
+            done
+            warn "Semua service di-stop"
+            pause; continue
+        fi
+
+        if [[ "$svc_pick" =~ ^[0-9]+$ ]] && [[ $svc_pick -ge 1 ]] && [[ $svc_pick -le ${#svc_ids[@]} ]]; then
+            local idx=$((svc_pick-1))
+            local sel_id="${svc_ids[$idx]}"
+            local sel_name="${svc_names[$idx]}"
+            echo
+            echo -e "${BOLD}${sel_name} — ${svc_status[$idx]}${NC}"
+            echo "   1) Start"
+            echo "   2) Stop"
+            echo "   3) Restart"
+            echo "   0) Batal"
+            read -p "Pilih aksi: " svc_act
+            case $svc_act in
+                1)
+                    if [[ "$sel_id" == docker-* ]]; then
+                        docker start "${sel_id#docker-}" 2>/dev/null && ok "${sel_name} started"
+                    else
+                        systemctl start "$sel_id" 2>/dev/null && ok "${sel_name} started"
+                    fi
+                    ;;
+                2)
+                    if [[ "$sel_id" == docker-* ]]; then
+                        docker stop "${sel_id#docker-}" 2>/dev/null && warn "${sel_name} stopped"
+                    else
+                        systemctl stop "$sel_id" 2>/dev/null && warn "${sel_name} stopped"
+                    fi
+                    ;;
+                3)
+                    if [[ "$sel_id" == docker-* ]]; then
+                        docker restart "${sel_id#docker-}" 2>/dev/null && ok "${sel_name} restarted"
+                    else
+                        systemctl restart "$sel_id" 2>/dev/null && ok "${sel_name} restarted"
+                    fi
+                    ;;
+            esac
+            pause; continue
+        fi
+
+        echo -e "${RED}Pilihan tidak valid${NC}"; sleep 1
+    done
+}
+
 # =========================== CLEANUP =========================================
 
 menu_cleanup() {
@@ -1347,17 +1480,18 @@ menu_utama() {
         echo -e "  ${CYAN}[19]${NC} Pasang Cloudflared"
 
         echo -e "${BOLD}${BLUE}━━━ TOOLS ━━━${NC}"
-        echo -e "  ${CYAN}[20]${NC} Monitoring Sistem"
-        echo -e "  ${CYAN}[21]${NC} Backup & Restore"
-        echo -e "  ${CYAN}[22]${NC} Uninstall Layanan"
-        echo -e "  ${CYAN}[23]${NC} Cleanup Sistem"
+        echo -e "  ${CYAN}[20]${NC} Service Manager (start/stop)"
+        echo -e "  ${CYAN}[21]${NC} Monitoring Sistem"
+        echo -e "  ${CYAN}[22]${NC} Backup & Restore"
+        echo -e "  ${CYAN}[23]${NC} Uninstall Layanan"
+        echo -e "  ${CYAN}[24]${NC} Cleanup Sistem"
         
         echo -e "${BOLD}${BLUE}━━━ ${NC}"
         echo -e "  ${GREEN}[A]${NC}  Install ALL (semua layanan)"
         echo -e "  ${RED}[Q]${NC}  Keluar"
         echo
         
-        read -p "$(echo -e ${YELLOW}"Pilih menu [1-23/A/Q]: "${NC})" pilih
+        read -p "$(echo -e ${YELLOW}"Pilih menu [1-24/A/Q]: "${NC})" pilih
         
         case $pilih in
             1)  update_system ;;
@@ -1379,10 +1513,11 @@ menu_utama() {
             17) pasang_docker; pasang_immich ;;
             18) pasang_tailscale ;;
             19) pasang_cloudflared ;;
-            20) menu_monitor ;;
-            21) menu_backup ;;
-            22) menu_uninstall ;;
-            23) menu_cleanup ;;
+            20) menu_services ;;
+            21) menu_monitor ;;
+            22) menu_backup ;;
+            23) menu_uninstall ;;
+            24) menu_cleanup ;;
             a|A) pasang_semua ;;
             q|Q) echo -e "${GREEN}Terima kasih!${NC}"; exit 0 ;;
             *)   echo -e "${RED}Pilihan tidak valid${NC}"; sleep 1 ;;
