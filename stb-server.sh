@@ -935,6 +935,63 @@ menu_monitor() {
     done
 }
 
+# =========================== CLEANUP =========================================
+
+menu_cleanup() {
+    header "CLEANUP SISTEM"
+    echo -e "${YELLOW}Memeriksa ruang yang bisa dibersihkan...${NC}\n"
+
+    local total_freed=0
+
+    _do_clean() {
+        local label="$1" cmd="$2"
+        echo -e "${CYAN}>>> ${label}...${NC}"
+        local before=$(df / | awk 'NR==2 {print $3}')
+        eval "$cmd" 2>/dev/null
+        local after=$(df / | awk 'NR==2 {print $3}')
+        local saved=$(( before - after ))
+        if [[ $saved -gt 0 ]]; then
+            echo -e "  ${GREEN}✓ Hemat: $(numfmt --to=iec $((saved*1024)) 2>/dev/null || echo "${saved}K")${NC}"
+            total_freed=$((total_freed + saved))
+        else
+            echo -e "  ${YELLOW}→ Tidak ada perubahan${NC}"
+        fi
+    }
+
+    _do_clean "APT autoremove" "apt autoremove -y 2>/dev/null"
+    _do_clean "APT autoclean" "apt autoclean -y 2>/dev/null"
+    _do_clean "APT clean" "apt clean 2>/dev/null"
+    _do_clean "Journalctl (log > 2 hari)" "journalctl --vacuum-time=2d 2>/dev/null"
+    _do_clean "Thumbnail cache" "rm -rf ~/.cache/thumbnails/* 2>/dev/null; rm -rf ~/.thumbnails/* 2>/dev/null"
+    _do_clean "Temporary files" "rm -rf /tmp/* 2>/dev/null; rm -rf /var/tmp/* 2>/dev/null"
+    _do_clean "Old log files" "find /var/log -name '*.gz' -o -name '*.old' -o -name '*.1' 2>/dev/null | xargs rm -f 2>/dev/null"
+
+    if command -v docker &>/dev/null; then
+        echo
+        _do_clean "Docker unused containers" "docker container prune -f 2>/dev/null"
+        _do_clean "Docker unused images" "docker image prune -af 2>/dev/null"
+        _do_clean "Docker unused volumes" "docker volume prune -f 2>/dev/null"
+        _do_clean "Docker build cache" "docker builder prune -af 2>/dev/null"
+    fi
+
+    echo
+    if [[ $total_freed -gt 0 ]]; then
+        ok "Total ruang dibebaskan: $(numfmt --to=iec $((total_freed*1024)) 2>/dev/null || echo "${total_freed}K")"
+    else
+        warn "Tidak ada ruang tambahan yang dibebaskan"
+    fi
+
+    # Tampilkan storage summary
+    echo
+    echo -e "${BOLD}Ringkasan Storage:${NC}"
+    df -h / | awk 'NR==2 {print "  Boot:  " $3 " / " $2 " (" $5 ")"}'
+    lsblk -ndo NAME,SIZE,MODEL 2>/dev/null | while read d s m; do
+        local mnt=$(lsblk -nlo MOUNTPOINT /dev/$d 2>/dev/null | grep -v "^$" | head -1)
+        [[ -n "$mnt" ]] && df -h "$mnt" 2>/dev/null | awk "NR==2 {print \"  /dev/$d: \" \$3 \" / \" \$2 \" (\" \$5 \")\"}"
+    done
+    pause
+}
+
 # =========================== BACKUP & RESTORE ===============================
 
 menu_backup() {
@@ -1283,13 +1340,14 @@ menu_utama() {
         echo -e "  ${CYAN}[20]${NC} Monitoring Sistem"
         echo -e "  ${CYAN}[21]${NC} Backup & Restore"
         echo -e "  ${CYAN}[22]${NC} Uninstall Layanan"
+        echo -e "  ${CYAN}[23]${NC} Cleanup Sistem"
         
         echo -e "${BOLD}${BLUE}━━━ ${NC}"
         echo -e "  ${GREEN}[A]${NC}  Install ALL (semua layanan)"
         echo -e "  ${RED}[Q]${NC}  Keluar"
         echo
         
-        read -p "$(echo -e ${YELLOW}"Pilih menu [1-22/A/Q]: "${NC})" pilih
+        read -p "$(echo -e ${YELLOW}"Pilih menu [1-23/A/Q]: "${NC})" pilih
         
         case $pilih in
             1)  update_system ;;
@@ -1314,6 +1372,7 @@ menu_utama() {
             20) menu_monitor ;;
             21) menu_backup ;;
             22) menu_uninstall ;;
+            23) menu_cleanup ;;
             a|A) pasang_semua ;;
             q|Q) echo -e "${GREEN}Terima kasih!${NC}"; exit 0 ;;
             *)   echo -e "${RED}Pilihan tidak valid${NC}"; sleep 1 ;;
