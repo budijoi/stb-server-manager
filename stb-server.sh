@@ -89,7 +89,7 @@ ceklayanan() {
 update_system() {
     header "UPDATE SYSTEM"
     apt update && apt upgrade -y
-    apt install -y curl wget sudo ufw htop iotop git unzip zip jq
+    apt install -y curl wget sudo ufw htop btop iotop git unzip zip jq
     ok "System updated"
     pause
 }
@@ -487,9 +487,9 @@ pilih_storage_utama() {
     for i in "${!disks_list[@]}"; do
         local icon=""
         case "${disks_type[$i]}" in
-            emmc)    icon="💾 eMMC" ;;
-            sdcard)  icon="📇 SD Card" ;;
-            external) icon="💽 HDD/SSD" ;;
+            emmc)    icon="💾" ;;
+            sdcard)  icon="📇" ;;
+            external) icon="💽" ;;
         esac
         echo -e "  ${CYAN}[$((i+1))]${NC} /dev/${disks_list[$i]} — ${disks_size[$i]} — $icon"
     done
