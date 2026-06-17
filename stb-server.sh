@@ -714,8 +714,8 @@ pasang_filebrowser() {
         | grep "browser_download_url.*linux-arm64" | grep -v ".tar.gz" | head -1 | cut -d\" -f4)
     
     if [[ -z "$fb_url" ]]; then
-        warn "Gagal dapat URL, menggunakan fallback v2.31.2"
-        fb_url="https://github.com/filebrowser/filebrowser/releases/download/v2.31.2/linux-arm64-filebrowser.tar.gz"
+        warn "Gagal dapat URL, menggunakan fallback v2.63.15"
+        fb_url="https://github.com/filebrowser/filebrowser/releases/download/v2.63.15/linux-arm64-filebrowser.tar.gz"
     fi
     
     curl -L -o filebrowser.tar.gz "$fb_url" 2>/dev/null
