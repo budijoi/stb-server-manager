@@ -1328,12 +1328,15 @@ _rm_casaos() {
 _rm_portainer() {
     docker stop portainer 2>/dev/null; docker rm portainer 2>/dev/null
     docker volume rm portainer_data 2>/dev/null
-    ok "Portainer dihapus"
+    docker rmi portainer/portainer-ce 2>/dev/null
+    rm -rf /var/lib/docker/volumes/portainer_data 2>/dev/null
+    ok "Portainer + data volume dihapus"
 }
 
 _rm_cockpit() {
-    apt remove -y cockpit 2>/dev/null
-    ok "Cockpit dihapus"
+    apt purge -y cockpit cockpit-* 2>/dev/null
+    rm -rf /etc/cockpit /var/log/cockpit 2>/dev/null
+    ok "Cockpit + konfigurasi dihapus"
 }
 
 _rm_filebrowser() {
@@ -1347,14 +1350,16 @@ _rm_filebrowser() {
 
 _rm_adguard() {
     docker stop adguardhome 2>/dev/null; docker rm adguardhome 2>/dev/null
-    rm -rf /opt/adguard 2>/dev/null
-    ok "AdGuard dihapus"
+    docker rmi adguard/adguardhome 2>/dev/null
+    rm -rf /opt/adguard /etc/adguard 2>/dev/null
+    ok "AdGuard + image dihapus"
 }
 
 _rm_jellyfin() {
     docker stop jellyfin 2>/dev/null; docker rm jellyfin 2>/dev/null
-    rm -rf /opt/jellyfin 2>/dev/null
-    ok "Jellyfin dihapus"
+    docker rmi jellyfin/jellyfin 2>/dev/null
+    rm -rf /opt/jellyfin /var/lib/docker/volumes/jellyfin* 2>/dev/null
+    ok "Jellyfin + data dihapus"
 }
 
 _rm_immich() {
@@ -1366,15 +1371,17 @@ _rm_immich() {
 
 _rm_tailscale() {
     tailscale down 2>/dev/null
-    apt remove -y tailscale 2>/dev/null
-    ok "Tailscale dihapus"
+    apt purge -y tailscale 2>/dev/null
+    rm -rf /var/lib/tailscale /etc/tailscale /var/cache/tailscale 2>/dev/null
+    ok "Tailscale + konfigurasi dihapus"
 }
 
 _rm_samba() {
-    systemctl stop smbd 2>/dev/null
-    systemctl disable smbd 2>/dev/null
-    apt remove -y samba samba-common-bin 2>/dev/null
-    ok "Samba dihapus"
+    systemctl stop smbd nmbd 2>/dev/null
+    systemctl disable smbd nmbd 2>/dev/null
+    apt purge -y samba samba-common-bin samba-libs 2>/dev/null
+    rm -rf /etc/samba /var/lib/samba /var/log/samba 2>/dev/null
+    ok "Samba + konfigurasi dihapus"
 }
 
 _rm_docker() {
@@ -1382,16 +1389,19 @@ _rm_docker() {
     docker rm $(docker ps -aq) 2>/dev/null
     docker system prune -af 2>/dev/null
     docker volume prune -af 2>/dev/null
-    apt remove -y docker docker-engine docker.io containerd runc docker-ce docker-ce-cli 2>/dev/null
-    rm -rf /var/lib/docker /etc/docker 2>/dev/null
-    ok "Docker dihapus total"
+    apt purge -y docker* containerd* runc 2>/dev/null
+    rm -rf /var/lib/docker /etc/docker /var/lib/containerd /etc/containerd 2>/dev/null
+    rm -f /etc/apt/sources.list.d/docker.list 2>/dev/null
+    rm -f /usr/share/keyrings/docker-archive-keyring.gpg 2>/dev/null
+    ok "Docker + semua data dihapus"
 }
 
 _rm_nginx() {
-    systemctl stop nginx 2>/dev/null
-    systemctl disable nginx 2>/dev/null
-    apt remove -y nginx php-fpm php-cli php-mbstring php-curl php-xml php-zip 2>/dev/null
-    ok "Nginx + PHP dihapus"
+    systemctl stop nginx php*-fpm 2>/dev/null
+    systemctl disable nginx php*-fpm 2>/dev/null
+    apt purge -y nginx* php* 2>/dev/null
+    rm -rf /etc/nginx /var/www /etc/php /var/log/nginx 2>/dev/null
+    ok "Nginx + PHP + konfigurasi dihapus"
 }
 
 _rm_cloudflared() {
