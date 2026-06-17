@@ -829,6 +829,35 @@ menu_monitor() {
         echo -e "${GREEN}Uptime:${NC} $UPTIME"
         echo -e "${GREEN}Proses:${NC} $(ps aux | wc -l) running"
         echo
+        echo -e "${BOLD}=== Storage Usage ===${NC}"
+        local _emmc=$(lsblk -ndo NAME /dev/mmcblk* 2>/dev/null | head -1)
+        if [[ -n "$_emmc" ]]; then
+            echo -e "${GREEN}eMMC:${NC} $(lsblk -ndo SIZE /dev/$_emmc 2>/dev/null) — $(df -h / 2>/dev/null | awk 'NR==2{print $5" used ("$3"/"$2")"}')"
+        fi
+        for _d in $(lsblk -ndo NAME | grep -E '^sd[a-z]+$|^mmcblk[0-9]+$' 2>/dev/null); do
+            local _rm=$(cat /sys/block/$_d/removable 2>/dev/null)
+            local _label=""
+            [[ "$_rm" == "1" ]] && _label="${CYAN}SD Card${NC}" || _label="${YELLOW}HDD/SSD${NC}"
+            local _parts=$(lsblk -nlo MOUNTPOINT /dev/$_d 2>/dev/null | grep -v "^$" | head -1)
+            local _size=$(lsblk -ndo SIZE /dev/$_d 2>/dev/null)
+            if [[ -n "$_parts" ]]; then
+                local _used=$(df -h "$_parts" 2>/dev/null | awk 'NR==2{print $3}')
+                local _total=$(df -h "$_parts" 2>/dev/null | awk 'NR==2{print $2}')
+                local _pct=$(df -h "$_parts" 2>/dev/null | awk 'NR==2{print $5}')
+                echo -e "$_label: /dev/$_d ($_size) — mount $_parts : ${_used}/${_total} (${_pct})"
+            elif [[ "$_rm" == "1" ]]; then
+                echo -e "${CYAN}SD Card:${NC} /dev/$_d ($_size) — ${RED}not mounted${NC}"
+            fi
+        done
+        if [[ -f "$CONFIG_DIR/storage.conf" ]]; then
+            local _stor_path=$(grep STORAGE_PATH "$CONFIG_DIR/storage.conf" 2>/dev/null | cut -d= -f2)
+            local _stor_type=$(grep STORAGE_TYPE "$CONFIG_DIR/storage.conf" 2>/dev/null | cut -d= -f2)
+            if [[ -n "$_stor_path" && -d "$_stor_path" ]]; then
+                echo -e "${GREEN}Primary:${NC} $_stor_type — $_stor_path ($(df -h "$_stor_path" 2>/dev/null | awk 'NR==2{print $5" used"}'))"
+            fi
+        fi
+        echo -e "${GREEN}Boot:${NC} $(df -h / 2>/dev/null | awk 'NR==2{print $5" used ("$3"/"$2")"}')"
+        echo
         echo -e "${BOLD}=== Docker Status ===${NC}"
         if command -v docker &>/dev/null; then
             docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null | head -10
