@@ -987,11 +987,31 @@ menu_uninstall() {
         done
         
         echo
+        echo -e "   ${RED}${BOLD}99) HAPUS SEMUA LAYANAN${NC}"
         echo "   0) Kembali ke menu utama"
         echo
-        read -p "$(echo -e ${YELLOW}Pilih nomor [0-${#svc_ids[@]}]: ${NC})" usta
+        read -p "$(echo -e ${YELLOW}Pilih nomor [0-${#svc_ids[@]} atau 99]: ${NC})" usta
         
         [[ "$usta" == "0" ]] && break
+        
+        # Uninstall All
+        if [[ "$usta" == "99" ]]; then
+            echo
+            echo -e "${RED}${BOLD}PERINGATAN: Semua layanan akan DIHAPUS!${NC}"
+            echo -e "Layanan yang akan dihapus:"
+            for i in "${!svc_ids[@]}"; do echo "  - ${svc_names[$i]}"; done
+            echo
+            read -p "Ketik UNINSTALL ALL untuk konfirmasi: " confirm_all
+            [[ "$confirm_all" != "UNINSTALL ALL" ]] && warn "Dibatalkan" && sleep 1 && continue
+            echo
+            for i in "${!svc_ids[@]}"; do
+                echo -e "${YELLOW}>>> Menghapus ${svc_names[$i]}...${NC}"
+                ${svc_rm_funcs[$i]}
+            done
+            ok "Semua layanan telah dihapus"
+            pause
+            break
+        fi
         
         if [[ ! "$usta" =~ ^[0-9]+$ ]] || [[ $usta -lt 1 ]] || [[ $usta -gt ${#svc_ids[@]} ]]; then
             echo -e "${RED}Pilihan tidak valid${NC}"; sleep 1; continue
