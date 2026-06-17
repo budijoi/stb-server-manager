@@ -815,6 +815,58 @@ pasang_tailscale() {
     pause
 }
 
+# =========================== CLOUDFLARED =====================================
+
+pasang_cloudflared() {
+    header "INSTALL CLOUDFLARED"
+    if command -v cloudflared &>/dev/null; then
+        info "cloudflared sudah terinstall. Versi: $(cloudflared --version 2>/dev/null | head -1)"
+        pause; return
+    fi
+
+    info "Mendeteksi arsitektur..."
+    local arch="arm64"
+    [[ "$(uname -m)" == "armv7l" ]] && arch="arm"
+
+    local url=$(curl -s https://api.github.com/repos/cloudflare/cloudflared/releases/latest 2>/dev/null \
+        | grep "browser_download_url.*linux-${arch}" | head -1 | cut -d\" -f4)
+
+    if [[ -z "$url" ]]; then
+        warn "Gagal dapat URL, pakai fallback v2025.2.0"
+        url="https://github.com/cloudflare/cloudflared/releases/download/2025.2.0/cloudflared-linux-${arch}"
+    fi
+
+    curl -L -o /usr/local/bin/cloudflared "$url" 2>/dev/null
+    chmod +x /usr/local/bin/cloudflared
+
+    if command -v cloudflared &>/dev/null; then
+        # Setup systemd service
+        cat > /etc/systemd/system/cloudflared.service <<CLDSVC
+[Unit]
+Description=cloudflared tunnel
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/cloudflared tunnel run
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+CLDSVC
+
+        ok "cloudflared terinstall. Jalankan: cloudflared tunnel login"
+        echo -e "${YELLOW}Contoh penggunaan:${NC}"
+        echo "  1. cloudflared tunnel login         → login via browser"
+        echo "  2. cloudflared tunnel create stb    → buat tunnel"
+        echo "  3. cloudflared tunnel route dns stb example.com  → route DNS"
+        echo "  4. systemctl start cloudflared      → jalankan service"
+    else
+        fail "Gagal install cloudflared"
+    fi
+    pause
+}
+
 # =========================== MONITORING =====================================
 
 menu_monitor() {
@@ -965,6 +1017,7 @@ deteksi_terinstall() {
         samba)      command -v smbd &>/dev/null; return $? ;;
         docker)     command -v docker &>/dev/null; return $? ;;
         nginx)      command -v nginx &>/dev/null; return $? ;;
+        cloudflared) command -v cloudflared &>/dev/null; return $? ;;
         *) return 1 ;;
     esac
 }
@@ -999,6 +1052,7 @@ menu_uninstall() {
         _add_svc "samba"      "Samba"         "_rm_samba"
         _add_svc "docker"     "Docker (all)"  "_rm_docker"
         _add_svc "nginx"      "Nginx + PHP"   "_rm_nginx"
+        _add_svc "cloudflared" "Cloudflared"   "_rm_cloudflared"
         
         if [[ ${#svc_ids[@]} -eq 0 ]]; then
             echo -e "${GREEN}Tidak ada layanan terinstall.${NC}"
@@ -1142,6 +1196,15 @@ _rm_nginx() {
     ok "Nginx + PHP dihapus"
 }
 
+_rm_cloudflared() {
+    systemctl stop cloudflared 2>/dev/null
+    systemctl disable cloudflared 2>/dev/null
+    rm -f /usr/local/bin/cloudflared /etc/systemd/system/cloudflared.service
+    rm -rf ~/.cloudflared 2>/dev/null
+    systemctl daemon-reload
+    ok "Cloudflared dihapus"
+}
+
 # =========================== INSTALASI ALL IN ONE ===========================
 
 pasang_semua() {
@@ -1163,6 +1226,7 @@ pasang_semua() {
     pasang_adguard
     pasang_jellyfin
     pasang_tailscale
+    pasang_cloudflared
     
     case "$SOC" in
         S905W)   optimasi_x96mini ;;
@@ -1213,18 +1277,19 @@ menu_utama() {
         echo -e "  ${CYAN}[16]${NC} Pasang Jellyfin"
         echo -e "  ${CYAN}[17]${NC} Pasang Immich"
         echo -e "  ${CYAN}[18]${NC} Pasang Tailscale"
-        
+        echo -e "  ${CYAN}[19]${NC} Pasang Cloudflared"
+
         echo -e "${BOLD}${BLUE}━━━ TOOLS ━━━${NC}"
-        echo -e "  ${CYAN}[19]${NC} Monitoring Sistem"
-        echo -e "  ${CYAN}[20]${NC} Backup & Restore"
-        echo -e "  ${CYAN}[21]${NC} Uninstall Layanan"
+        echo -e "  ${CYAN}[20]${NC} Monitoring Sistem"
+        echo -e "  ${CYAN}[21]${NC} Backup & Restore"
+        echo -e "  ${CYAN}[22]${NC} Uninstall Layanan"
         
         echo -e "${BOLD}${BLUE}━━━ ${NC}"
         echo -e "  ${GREEN}[A]${NC}  Install ALL (semua layanan)"
         echo -e "  ${RED}[Q]${NC}  Keluar"
         echo
         
-        read -p "$(echo -e ${YELLOW}"Pilih menu [1-21/A/Q]: "${NC})" pilih
+        read -p "$(echo -e ${YELLOW}"Pilih menu [1-22/A/Q]: "${NC})" pilih
         
         case $pilih in
             1)  update_system ;;
@@ -1245,9 +1310,10 @@ menu_utama() {
             16) pasang_docker; pasang_jellyfin ;;
             17) pasang_docker; pasang_immich ;;
             18) pasang_tailscale ;;
-            19) menu_monitor ;;
-            20) menu_backup ;;
-            21) menu_uninstall ;;
+            19) pasang_cloudflared ;;
+            20) menu_monitor ;;
+            21) menu_backup ;;
+            22) menu_uninstall ;;
             a|A) pasang_semua ;;
             q|Q) echo -e "${GREEN}Terima kasih!${NC}"; exit 0 ;;
             *)   echo -e "${RED}Pilihan tidak valid${NC}"; sleep 1 ;;
