@@ -964,13 +964,30 @@ menu_monitor() {
             echo -e "${RED}Docker tidak terinstall${NC}"
         fi
         echo
-        echo -e "${BOLD}=== Layanan ===${NC}"
-        printf "%-20s %s\n" "CasaOS" "$(ceklayanan casaos)"
-        printf "%-20s %s\n" "Portainer" "$(ceklayanan portainer)"
-        printf "%-20s %s\n" "Cockpit" "$(ceklayanan cockpit)"
-        printf "%-20s %s\n" "Samba" "$(ceklayanan smbd)"
-        printf "%-20s %s\n" "FileBrowser" "$(ceklayanan filebrowser)"
-        printf "%-20s %s\n" "Nginx" "$(ceklayanan nginx)"
+        echo -e "${BOLD}=== Layanan & Port ===${NC}"
+        printf "  %-22s %-10s %s\n" "Service" "Status" "Port"
+        printf "  %-22s %-10s %s\n" "-------" "------" "----"
+        # Systemd services with known ports
+        for _s in casaos cockpit smbd nginx filebrowser; do
+            local _port=""
+            case $_s in
+                casaos)      _port="80" ;;
+                cockpit)     _port="9090" ;;
+                smbd)        _port="445" ;;
+                nginx)       _port="80, 443" ;;
+                filebrowser) _port="8080" ;;
+            esac
+            printf "  %-22s %-10s %s\n" "$_s" "$(ceklayanan $_s)" "$_port"
+        done
+        # Docker containers
+        if command -v docker &>/dev/null; then
+            while IFS=$'\t' read -r _dn _dp _ds; do
+                local _dpclean=$(echo "$_dp" | sed 's/0.0.0.0://g; s/->[^,]*//g; s/,//g; s/ //g')
+                local _dstatus="${RED}stopped${NC}"
+                [[ "$_ds" == Up* ]] && _dstatus="${GREEN}running${NC}"
+                printf "  %-22s %-10s %s\n" "$_dn (docker)" "$_dstatus" "$_dpclean"
+            done < <(docker ps -a --format '{{.Names}}\t{{.Ports}}\t{{.Status}}' 2>/dev/null | grep -v -E '^(portainer|casaos)\b')
+        fi
         echo
         echo "1) Refresh | 2) HTOP | 3) Back"
         read -p "Pilihan: " mmon
