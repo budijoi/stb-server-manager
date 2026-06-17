@@ -84,6 +84,35 @@ ceklayanan() {
     else echo -e "${RED}Not found${NC}"; fi
 }
 
+# =========================== DETEKSI SD CARD =================================
+
+detect_sdcard() {
+    SDCARD_PATH=""
+    # Cari mount point SD card (removable + mount)
+    for _d in $(lsblk -ndo NAME | grep -E '^mmcblk[0-9]+$|^sd[a-z]+$'); do
+        local _rm=$(cat /sys/block/$_d/removable 2>/dev/null)
+        if [[ "$_rm" == "1" ]]; then
+            local _mnt=$(lsblk -nlo MOUNTPOINT /dev/$_d 2>/dev/null | grep -v "^$" | head -1)
+            if [[ -n "$_mnt" ]]; then
+                SDCARD_PATH="$_mnt"
+                break
+            fi
+        fi
+    done
+    # Fallback: cek mount point umum jika tidak ketemu removable
+    if [[ -z "$SDCARD_PATH" ]]; then
+        for _mp in /mnt/sdcard /mnt/storage /media/sdcard /media/storage; do
+            mountpoint -q "$_mp" 2>/dev/null && { SDCARD_PATH="$_mp"; break; }
+        done
+    fi
+    export SDCARD_PATH
+    if [[ -n "$SDCARD_PATH" ]]; then
+        info "SD Card terdeteksi di: $SDCARD_PATH"
+    else
+        warn "SD Card tidak terdeteksi. Data service akan pakai /opt/"
+    fi
+}
+
 # =========================== INSTALASI DASAR ================================
 
 update_system() {
@@ -695,14 +724,15 @@ pasang_filebrowser() {
     chmod +x /usr/local/bin/filebrowser
     rm -f filebrowser.tar.gz
     
-    mkdir -p /etc/filebrowser
+    local _fb="${SDCARD_PATH:-/opt}/filebrowser"
+    mkdir -p "$_fb" /etc/filebrowser
     cat > /etc/filebrowser/config.json <<FBCONF
 {
   "port": 8080,
   "address": "0.0.0.0",
-  "root": "/",
-  "database": "/etc/filebrowser/filebrowser.db",
-  "log": "/var/log/filebrowser.log"
+  "root": "${SDCARD_PATH:-/mnt}",
+  "database": "${_fb}/filebrowser.db",
+  "log": "${_fb}/filebrowser.log"
 }
 FBCONF
     
@@ -729,7 +759,7 @@ FBSVC
     /usr/local/bin/filebrowser users add admin admin12345678 --config=/etc/filebrowser/config.json --perm.admin 2>/dev/null || \
     /usr/local/bin/filebrowser users update admin --config=/etc/filebrowser/config.json --password=admin12345678 2>/dev/null
 
-    ok "FileBrowser: http://$(hostname -I | awk '{print $1}'):8080 (admin / admin12345678)"
+    ok "FileBrowser: http://$(hostname -I | awk '{print $1}'):8080 (admin / admin12345678, root: ${SDCARD_PATH:-/mnt})"
     pause
 }
 
@@ -742,16 +772,17 @@ pasang_adguard() {
         pause; return
     fi
     
-    mkdir -p /opt/adguard/work /opt/adguard/conf
+    local _adg="${SDCARD_PATH:-/opt}/adguard"
+    mkdir -p "$_adg/work" "$_adg/conf"
     
     docker run -d --name adguardhome \
         --restart=always \
         -p 53:53/tcp -p 53:53/udp \
         -p 3000:3000/tcp \
         -p 853:853/tcp \
-        -v /opt/adguard/work:/opt/adguard/work \
-        -v /opt/adguard/conf:/opt/adguard/conf \
-        adguard/adguardhome:latest && ok "AdGuard: http://$(hostname -I | awk '{print $1}'):3000" || fail "Gagal"
+        -v "$_adg/work:/opt/adguard/work" \
+        -v "$_adg/conf:/opt/adguard/conf" \
+        adguard/adguardhome:latest && ok "AdGuard: http://$(hostname -I | awk '{print $1}'):3000 (data di $_adg)" || fail "Gagal"
     pause
 }
 
@@ -764,17 +795,18 @@ pasang_jellyfin() {
         pause; return
     fi
     
-    mkdir -p /opt/jellyfin/config /opt/jellyfin/cache /opt/jellyfin/media
+    local _jf="${SDCARD_PATH:-/opt}/jellyfin"
+    mkdir -p "$_jf/config" "$_jf/cache" "$_jf/media"
     
     docker run -d --name jellyfin \
         --restart=always \
         -p 8096:8096 \
-        -v /opt/jellyfin/config:/config \
-        -v /opt/jellyfin/cache:/cache \
-        -v /opt/jellyfin/media:/media \
+        -v "$_jf/config:/config" \
+        -v "$_jf/cache:/cache" \
+        -v "$_jf/media:/media" \
         -v /mnt:/mnt:ro \
         --device /dev/dri:/dev/dri:rw \
-        jellyfin/jellyfin:latest && ok "Jellyfin: http://$(hostname -I | awk '{print $1}'):8096" || fail "Gagal"
+        jellyfin/jellyfin:latest && ok "Jellyfin: http://$(hostname -I | awk '{print $1}'):8096 (data di $_jf)" || fail "Gagal"
     pause
 }
 
@@ -787,7 +819,8 @@ pasang_immich() {
         pause; return
     fi
     
-    mkdir -p /opt/immich
+    local _im="${SDCARD_PATH:-/opt}/immich"
+    mkdir -p "$_im" "$_im/upload"
         
     if ! command -v docker-compose &>/dev/null && ! docker compose version &>/dev/null; then
         apt install -y docker-compose-plugin 2>/dev/null || \
@@ -796,14 +829,14 @@ pasang_immich() {
         chmod +x /usr/local/bin/docker-compose 2>/dev/null
     fi
     
-    cd /opt/immich
+    cd "$_im"
     curl -L https://github.com/immich-app/immich/releases/latest/download/docker-compose.yml -o docker-compose.yml 2>/dev/null
     curl -L https://github.com/immich-app/immich/releases/latest/download/example.env -o .env 2>/dev/null
     
     sed -i "s/DB_PASSWORD=.*/DB_PASSWORD=$(tr -dc A-Za-z0-9 < /dev/urandom | head -c 16)/" .env
-    sed -i "s/UPLOAD_LOCATION=.*/UPLOAD_LOCATION=\/opt\/immich\/upload/" .env
+    sed -i "s|UPLOAD_LOCATION=.*|UPLOAD_LOCATION=$_im/upload|" .env
     
-    docker compose up -d 2>/dev/null && ok "Immich: http://$(hostname -I | awk '{print $1}'):2283" || fail "Gagal install Immich"
+    docker compose up -d 2>/dev/null && ok "Immich: http://$(hostname -I | awk '{print $1}'):2283 (data di $_im)" || fail "Gagal install Immich"
     cd "$SCRIPT_DIR"
     pause
 }
@@ -848,6 +881,11 @@ pasang_cloudflared() {
     chmod +x /usr/local/bin/cloudflared
 
     if command -v cloudflared &>/dev/null; then
+        local _cf="${SDCARD_PATH:-$HOME}/.cloudflared"
+        mkdir -p "$_cf"
+        # Symlink config ke SD card
+        rm -rf "$HOME/.cloudflared" 2>/dev/null
+        ln -sf "$_cf" "$HOME/.cloudflared" 2>/dev/null
         # Setup systemd service
         cat > /etc/systemd/system/cloudflared.service <<CLDSVC
 [Unit]
@@ -858,12 +896,13 @@ After=network.target
 ExecStart=/usr/local/bin/cloudflared tunnel run
 Restart=always
 RestartSec=10
+Environment=HOME=$HOME
 
 [Install]
 WantedBy=multi-user.target
 CLDSVC
 
-        ok "cloudflared terinstall. Jalankan: cloudflared tunnel login"
+        ok "cloudflared terinstall. Config: $_cf"
         echo -e "${YELLOW}Contoh penggunaan:${NC}"
         echo "  1. cloudflared tunnel login         → login via browser"
         echo "  2. cloudflared tunnel create stb    → buat tunnel"
@@ -1343,29 +1382,30 @@ _rm_filebrowser() {
     systemctl stop filebrowser 2>/dev/null
     systemctl disable filebrowser 2>/dev/null
     rm -f /usr/local/bin/filebrowser /etc/systemd/system/filebrowser.service
-    rm -rf /etc/filebrowser
+    rm -rf /etc/filebrowser "${SDCARD_PATH:-/opt}/filebrowser" 2>/dev/null
     systemctl daemon-reload
-    ok "FileBrowser dihapus"
+    ok "FileBrowser + data dihapus"
 }
 
 _rm_adguard() {
     docker stop adguardhome 2>/dev/null; docker rm adguardhome 2>/dev/null
     docker rmi adguard/adguardhome 2>/dev/null
-    rm -rf /opt/adguard /etc/adguard 2>/dev/null
+    rm -rf /opt/adguard /etc/adguard "${SDCARD_PATH:-/opt}/adguard" 2>/dev/null
     ok "AdGuard + image dihapus"
 }
 
 _rm_jellyfin() {
     docker stop jellyfin 2>/dev/null; docker rm jellyfin 2>/dev/null
     docker rmi jellyfin/jellyfin 2>/dev/null
-    rm -rf /opt/jellyfin /var/lib/docker/volumes/jellyfin* 2>/dev/null
+    rm -rf /opt/jellyfin /var/lib/docker/volumes/jellyfin* "${SDCARD_PATH:-/opt}/jellyfin" 2>/dev/null
     ok "Jellyfin + data dihapus"
 }
 
 _rm_immich() {
-    cd /opt/immich 2>/dev/null && docker compose down -v 2>/dev/null
+    local _im="${SDCARD_PATH:-/opt}/immich"
+    cd "$_im" 2>/dev/null && docker compose down -v 2>/dev/null
     cd "$SCRIPT_DIR"
-    rm -rf /opt/immich 2>/dev/null
+    rm -rf /opt/immich "$_im" 2>/dev/null
     ok "Immich dihapus"
 }
 
@@ -1408,9 +1448,9 @@ _rm_cloudflared() {
     systemctl stop cloudflared 2>/dev/null
     systemctl disable cloudflared 2>/dev/null
     rm -f /usr/local/bin/cloudflared /etc/systemd/system/cloudflared.service
-    rm -rf ~/.cloudflared 2>/dev/null
+    rm -rf ~/.cloudflared "${SDCARD_PATH:-$HOME}/.cloudflared" 2>/dev/null
     systemctl daemon-reload
-    ok "Cloudflared dihapus"
+    ok "Cloudflared + config dihapus"
 }
 
 # =========================== INSTALASI ALL IN ONE ===========================
@@ -1549,6 +1589,7 @@ echo
 cek_root
 cek_armbian
 deteksi_cpu
+detect_sdcard
 echo
 
 # Logging
