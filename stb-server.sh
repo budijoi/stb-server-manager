@@ -700,7 +700,7 @@ pasang_filebrowser() {
 {
   "port": 8080,
   "address": "0.0.0.0",
-  "root": "/mnt",
+  "root": "/",
   "database": "/etc/filebrowser/filebrowser.db",
   "log": "/var/log/filebrowser.log"
 }
@@ -721,7 +721,15 @@ WantedBy=multi-user.target
 FBSVC
     
     systemctl daemon-reload
-    systemctl enable --now filebrowser && ok "FileBrowser: http://$(hostname -I | awk '{print $1}'):8080 (admin/admin)" || fail "Gagal"
+    systemctl enable --now filebrowser 2>/dev/null
+
+    # Init DB + buat user admin
+    sleep 2
+    /usr/local/bin/filebrowser config init --config=/etc/filebrowser/config.json 2>/dev/null
+    /usr/local/bin/filebrowser users add admin admin12345678 --config=/etc/filebrowser/config.json --perm.admin 2>/dev/null || \
+    /usr/local/bin/filebrowser users update admin --config=/etc/filebrowser/config.json --password=admin12345678 2>/dev/null
+
+    ok "FileBrowser: http://$(hostname -I | awk '{print $1}'):8080 (admin / admin12345678)"
     pause
 }
 
