@@ -117,7 +117,7 @@ detect_sdcard() {
 
 update_system() {
     header "UPDATE SYSTEM"
-    apt update && apt upgrade -y
+    apt update -y
     apt install -y curl wget sudo ufw htop btop iotop git unzip zip jq
     ok "System updated"
     pause
